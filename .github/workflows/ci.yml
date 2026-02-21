@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        go-version: ["1.21", "1.22", "1.23"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go-version }}
+
+      - name: Download dependencies
+        run: go mod tidy
+
+      - name: Build
+        run: go build ./...
+
+      - name: Test
+        run: go test -v -race -coverprofile=coverage.out ./...
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage.out
+```
+
+---
+
+### Step 17: Tag Your First Release
+
+1. Go to **Releases** → **"Draft a new release"**
+2. Tag: `v0.1.0`
+3. Title: `v0.1.0 — Initial Release`
+4. Description:
+```
+## gorich v0.1.0 — Initial Release
+
+Beautiful terminal output for Go, inspired by Python's `rich` library.
+
+### What's included:
+- Styled text with markup syntax `[bold red]text[/]`
+- Tables with multiple border styles, alignment, and column styling
+- Panels with titles, subtitles, and padding
+- Horizontal rules / dividers
+- Tree views
+- Progress bars with ETA and the `Track()` generic helper
+- Terminal spinners + `WithSpinner()` convenience wrapper
+- Syntax highlighting for Go, Python, and JSON
+- Log levels (INFO / SUCCESS / WARNING / ERROR / DEBUG)
+- `Inspect()` for pretty-printing values
+- Multi-column layout
+- True-color, 256-color, and ANSI color support
+- Everything writes to `io.Writer` — perfect for AI agents, tests, and CLIs
+
+**Install:** `go get github.com/njchilds90/gorich@v0.1.0`
+
+**Docs:** https://pkg.go.dev/github.com/njchilds90/gorich
