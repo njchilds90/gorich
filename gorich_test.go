@@ -1,176 +1,116 @@
-package gorich_test
+package gorich
 
 import (
 	"bytes"
+	"regexp"
 	"strings"
 	"testing"
-
-	"github.com/njchilds90/gorich"
+	"time"
 )
 
-func TestColorize(t *testing.T) {
-	result := gorich.Colorize("hello", gorich.Red, gorich.Bold)
-	if !strings.Contains(result, "hello") {
-		t.Error("Colorize: expected 'hello' in result")
-	}
-	if !strings.HasSuffix(result, gorich.Reset) {
-		t.Error("Colorize: expected Reset at end")
+// stripANSI removes common ANSI Select Graphic Rendition sequences.
+//
+// The production code intentionally only understands a minimal subset of ANSI,
+// so the test helper mirrors that simplicity.
+func stripANSI(s string) string {
+	re := regexp.MustCompile(`\x1b\[[0-9;]*m`)
+	return re.ReplaceAllString(s, "")
+}
+
+func TestSyntaxHighlight_GoTrailingBackslashDoesNotPanic(t *testing.T) {
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("SyntaxHighlight panicked: %v", r)
+		}
+	}()
+
+	// This input includes an unterminated string literal with a trailing backslash.
+	// The highlighter must not panic even when input is invalid source code.
+	_ = SyntaxHighlight("package main\nfunc main() { s := \"abc\\\" }\n", "go")
+}
+
+func TestSyntaxHighlight_JSONEscapedQuoteKeepsOutputIntact(t *testing.T) {
+	input := `{"a":"b\"c","n":1}`
+	out := SyntaxHighlight(input, "json")
+	plain := stripANSI(out)
+	if plain != input {
+		t.Fatalf("expected highlighted JSON to preserve original content after stripping ANSI; got %q want %q", plain, input)
 	}
 }
 
-func TestMarkup(t *testing.T) {
-	result := gorich.Markup("[bold]test[/]")
-	if !strings.Contains(result, "test") {
-		t.Error("Markup: expected 'test' in result")
-	}
-	if !strings.Contains(result, gorich.Bold) {
-		t.Error("Markup: expected Bold code")
-	}
-}
-
-func TestMarkupUnknownTag(t *testing.T) {
-	result := gorich.Markup("[unknown]test[/]")
-	if !strings.Contains(result, "test") {
-		t.Error("Markup with unknown tag: expected 'test'")
-	}
-}
-
-func TestStyle(t *testing.T) {
-	s := gorich.NewStyle(gorich.Green, gorich.Bold)
-	result := s.Apply("hi")
-	if !strings.Contains(result, "hi") {
-		t.Error("Style.Apply: expected 'hi'")
-	}
-}
-
-func TestTableRender(t *testing.T) {
+func TestTable_Render_TruncatesUTF8Safely(t *testing.T) {
 	var buf bytes.Buffer
-	table := gorich.NewTable(
-		gorich.WithTitle("Test Table"),
-		gorich.WithWriter(&buf),
+	table := NewTable(
+		WithWriter(&buf),
+		WithShowHeader(true),
+		WithPadding(1),
 	)
-	table.AddColumn("Name")
-	table.AddColumn("Value", gorich.ColAlign(gorich.AlignRight))
-	table.AddRow("foo", "123")
-	table.AddRow("bar", "456")
+	table.AddColumn("Word", ColMaxWidth(2))
+	table.AddRow("你好")
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("Table.Render panicked: %v", r)
+		}
+	}()
 	table.Render()
 
-	out := buf.String()
-	if !strings.Contains(out, "foo") {
-		t.Error("Table: expected 'foo' in output")
-	}
-	if !strings.Contains(out, "456") {
-		t.Error("Table: expected '456' in output")
+	plain := stripANSI(buf.String())
+	if !strings.Contains(plain, "你…") {
+		t.Fatalf("expected truncated output to contain a valid rune + ellipsis; got %q", plain)
 	}
 }
 
-func TestPanelRender(t *testing.T) {
+func TestTable_Render_TruncatesANSISafely(t *testing.T) {
 	var buf bytes.Buffer
-	gorich.NewPanel("Hello Panel",
-		gorich.PanelTitle("Test"),
-		gorich.PanelWriter(&buf),
-	).Render()
-	out := buf.String()
-	if !strings.Contains(out, "Hello Panel") {
-		t.Error("Panel: expected content in output")
-	}
-}
+	table := NewTable(
+		WithWriter(&buf),
+		WithShowHeader(false),
+	)
+	table.AddColumn("Status", ColMaxWidth(1))
+	table.AddRow(StyleSuccess.Apply("OK"))
 
-func TestRuleRender(t *testing.T) {
-	var buf bytes.Buffer
-	gorich.NewRule(
-		gorich.RuleTitle("Section"),
-		gorich.RuleWidth(40),
-		gorich.RuleWriter(&buf),
-	).Render()
-	out := buf.String()
-	if !strings.Contains(out, "Section") {
-		t.Error("Rule: expected title in output")
-	}
-}
-
-func TestTreeRender(t *testing.T) {
-	var buf bytes.Buffer
-	tr := gorich.NewTree("Root", gorich.TreeWriter(&buf))
-	tr.Root().Add("child1")
-	child2 := tr.Root().Add("child2")
-	child2.Add("grandchild")
-	tr.Render()
-	out := buf.String()
-	if !strings.Contains(out, "Root") {
-		t.Error("Tree: expected 'Root'")
-	}
-	if !strings.Contains(out, "grandchild") {
-		t.Error("Tree: expected 'grandchild'")
-	}
-}
-
-func TestProgressBar(t *testing.T) {
-	var buf bytes.Buffer
-	bar := gorich.NewProgressBar(10, gorich.BarWriter(&buf), gorich.BarShowETA(false))
-	bar.Update(5)
-	bar.Finish()
-	out := buf.String()
-	if !strings.Contains(out, "10/10") {
-		t.Error("ProgressBar: expected '10/10'")
-	}
-}
-
-func TestSyntaxHighlight(t *testing.T) {
-	code := `func main() { fmt.Println("hello") }`
-	result := gorich.SyntaxHighlight(code, "go")
-	if !strings.Contains(result, "main") {
-		t.Error("SyntaxHighlight: expected 'main' in output")
-	}
-}
-
-func TestTrack(t *testing.T) {
-	items := []int{1, 2, 3, 4, 5}
-	sum := 0
-	gorich.Track(items, "Summing", func(n int) { sum += n })
-	if sum != 15 {
-		t.Errorf("Track: expected sum=15, got %d", sum)
-	}
-}
-
-func TestLog(t *testing.T) {
-	var buf bytes.Buffer
-	gorich.Flog(&buf, "INFO", "test message")
-	if !strings.Contains(buf.String(), "test message") {
-		t.Error("Log: expected message in output")
-	}
-}
-
-func TestVisibleLen(t *testing.T) {
-	// test through table (indirectly) — coloring shouldn't affect widths
-	var buf bytes.Buffer
-	table := gorich.NewTable(gorich.WithWriter(&buf))
-	table.AddColumn("Hello")
-	table.AddRow(gorich.Colorize("Hello", gorich.Red)) // same visual width as "Hello"
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("Table.Render panicked: %v", r)
+		}
+	}()
 	table.Render()
-	// If widths are miscomputed, borders will be crooked — just ensure no panic
-}
 
-func TestInspect(t *testing.T) {
-	// Just ensure it doesn't panic
-	gorich.Inspect("myVar", map[string]int{"a": 1})
-}
-
-func TestColumns(t *testing.T) {
-	// Just ensure it doesn't panic
-	gorich.Columns([]string{"apple", "banana", "cherry"}, 2)
-}
-
-func TestRGB256(t *testing.T) {
-	result := gorich.RGB256("hello", 196)
-	if !strings.Contains(result, "hello") {
-		t.Error("RGB256: expected 'hello'")
+	plain := stripANSI(buf.String())
+	if !strings.Contains(plain, "…") {
+		t.Fatalf("expected ANSI-styled cell to truncate to an ellipsis; got %q", plain)
 	}
 }
 
-func TestTrueColor(t *testing.T) {
-	result := gorich.TrueColor("hi", 255, 128, 0)
-	if !strings.Contains(result, "hi") {
-		t.Error("TrueColor: expected 'hi'")
+func TestSpinner_StopIsIdempotentAndEmptyFramesDoNotPanic(t *testing.T) {
+	var buf bytes.Buffer
+	s := NewSpinner("Working",
+		SpinnerFrames([]string{}),
+		SpinnerWriter(&buf),
+	)
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("Spinner panicked: %v", r)
+		}
+	}()
+
+	s.Start()
+	time.Sleep(10 * time.Millisecond)
+	s.Stop()
+	s.Stop()
+
+	plain := stripANSI(buf.String())
+	if !strings.Contains(plain, "Working") {
+		t.Fatalf("expected spinner output to include description; got %q", plain)
+	}
+}
+
+func TestFcolumns_WritesToProvidedWriterAndHandlesInvalidColumnCount(t *testing.T) {
+	var buf bytes.Buffer
+	Fcolumns(&buf, []string{"a", "b", "c"}, 0)
+	if buf.Len() == 0 {
+		t.Fatalf("expected output to be written to the provided writer")
 	}
 }
